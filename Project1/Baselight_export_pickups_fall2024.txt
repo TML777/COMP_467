@@ -1,0 +1,7 @@
+/baselightfilesystem1/Deadpool3/reel1/partA/1920x1080 O 2219 2220
+/baselightfilesystem1/Deadpool3/reel1/VFX/AnimalLogic 8845
+/baselightfilesystem1/Deadpool3/reel1/VFX/AnimalLogic <err>
+/baselightfilesystem1/Deadpool3/pickups/shot_1ab/1920x1080 8847
+/baselightfilesystem1/Deadpool3/pickups/shot_2b/1920x1080 10006 10007 10008
+/baselightfilesystem1/Deadpool3/reel1/partC/1920x1080 10009 10010 10qwe
+

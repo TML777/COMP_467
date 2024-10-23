@@ -1,0 +1,5 @@
+Hello, world!
+This is a sample text file to test out Python code.
+Chaja is an amazing prof.
+More Chaja lore during class plz.
+The quick brown fox jumps over the lazy dog.
