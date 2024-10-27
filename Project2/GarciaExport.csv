@@ -1,0 +1,2 @@
+Test #,Build #,Category,Test Case,Expected Result,Actual Result,Repeatable?,Blocker?,Test Owner
+2,10/08/2024,Game,user case:  not enough ways to counter enemy ,"there is more ways to counteract situations such as when you have lack of cards on deckk, to win the game.",when faced with no cards on deck it seem like your only option is to save by continuously surrendering rounds to draw single cards at a time,yes,no,Sergio Garcia

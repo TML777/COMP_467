@@ -1,0 +1,2 @@
+Test #,Build #,Category,Test Case,Expected Result,Actual Result,Repeatable?,Blocker?,Test Owner
+1,10/08/2024,Login,Login page for wallet seems unhelpful.,"Either for the site to redirect me to the extentions instalition page, or to open up the extention if it was installed","A popup that shows a usless QR code for mobile divices and a bucnch of desktop apps, that is not very useful for non-crypto users.",Yes,No,Matthew Bellman

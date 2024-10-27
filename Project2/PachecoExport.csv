@@ -1,0 +1,2 @@
+Test #,Build #,Category,Test Case,Expected Result,Actual Result,Repeatable?,Blocker?,Test Owner
+4,10/12/2024,Arena/UI/EndersGate,Improvement: The scroll bar should stop at the last item,Scroller stops after last card is fully shown,Scroller bar goes far past the last item,yes,no,Denise Pacheco
