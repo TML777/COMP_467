@@ -65,7 +65,7 @@ def findDups(list):
         temp = temp.lower()
         temp = temp.split()
         
-        ratio = len(temp)*.75
+        ratio = len(temp)*.80
         for word in temp:
             
             if(match >= ratio or unmatch>=ratio):
@@ -87,22 +87,28 @@ def findDups(list):
 # takes in a list and returns DataFrame without dupes
 def dropDupes(list):
     dataFrame = pd.DataFrame(list)
+    toRemove = []
+    tempList = dataFrame["Test Case"].tolist()
     for i in range(0,6):
-        for j in range(6, i+1, -1):
-            tempList = dataFrame["Test Case"].tolist()
+        for j in range(6, i, -1):
+            
             runList = tempList[i*len(tempList)//6:(i+1)*len(tempList)//6]
-            runList += (tempList[j*len(tempList)//6:(j+1)*len(tempList)//6])
+            runList += tempList[j*len(tempList)//6:(j+1)*len(tempList)//6]
 
-             
             removeList = findDups(runList)
             removeList.reverse()
             for row in removeList:
-                if(row > len(tempList)//6):
-                    row += (j*len(tempList)//6 - len(tempList)//6)
-                else:
+                if(row < len(tempList)//6):
                     row += i*len(tempList)//6
-                dataFrame.drop(row,  errors='ignore', inplace= True)
+                else:
+                    row += (j*len(tempList)//6 - len(tempList)//6)
 
+                if row not in toRemove:
+                    toRemove.append(row)
+
+
+    dataFrame.drop(toRemove,  errors='ignore', inplace= True)
+    dataFrame.reset_index(drop=True, inplace=True)
     return dataFrame
 
 
@@ -246,7 +252,6 @@ if(args.all_on_date):
 
 if(args.triple_header):
     printTripleHeader()
-
 
 
 
