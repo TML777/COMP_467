@@ -1,11 +1,11 @@
 import argparse
-import pymongo
+from pymongo import MongoClient
 import pandas as pd
 import re
 from sys import argv as commandLineArguments
 from string import punctuation
 
-myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+myclient = MongoClient("mongodb://localhost:27017/")
 db = myclient["BugReports"]
 
 collection1 = db["Collection1"]
@@ -51,60 +51,78 @@ def exportUser(user):
 
 
 
-# Returns a list of all duplicate locations in a list
-def findDups(list):
-    toRemove = []
-    temp = str(list[0]).translate(str.maketrans('', '', punctuation))
-    temp = temp.lower()
-    stringList = temp.split()
-
-    for i in range(1, len(list)):
-        match = 0
-        unmatch = 0
-        temp = str(list[i]).translate(str.maketrans('', '', punctuation))
+# Modifies removeList to add all duplicate locations in a list of sentences
+# List should not be empty
+# Goes thru the list and if the words for a sentence appear on any other sentence before it,
+#       it is considered a repeat
+# The ratio of how many words need to match can be modified by PERCENTAGE_OF_WORDS
+#       1 being 100% of words in current sentence need to apear in 
+#           any other sentence before the curent
+#           in other wrods the closer to 1 the more give it has
+#       (0.85 was tuned with all repeatable bug entries)
+# Since list can be two lists connected together, 
+#       listDivide is where in list it list divides
+#       leftIndex is what the index on of left of dived should be
+#       rightIndex is what the index on of left of dived should be
+def findDups(list, removeList, listDivide, leftIndex, rightIndex):
+    PERCENTAGE_OF_WORDS = 0.85
+    if(list):
+        temp = str(list[0]).translate(str.maketrans('', '', punctuation))
         temp = temp.lower()
-        temp = temp.split()
-        
-        ratio = len(temp)*.80
-        for word in temp:
+        stringList = temp.split()
+
+        for i in range(1, len(list)):
+            match = 0
+            unmatch = 0
+            temp = str(list[i]).translate(str.maketrans('', '', punctuation))
+            temp = temp.lower()
+            temp = temp.split()
             
-            if(match >= ratio or unmatch>=ratio):
-                if(match >= ratio):
-                    toRemove.append(i)
-                    
-                break
-            
-            if(word in stringList):
-                match += 1
-            else:
-                unmatch += 1
+            ratio = len(temp)*PERCENTAGE_OF_WORDS
+            for word in temp:
+                if(word in stringList):
+                    match += 1
+                else:
+                    unmatch += 1
+                    stringList.append(word)
+                
+                if(match >= ratio or unmatch>=ratio):
+                    if(match >= ratio):
+                        rowToRemove = i
 
-        
-        stringList += temp
+                        if(rowToRemove < listDivide):
+                            rowToRemove += leftIndex*listDivide
+                        else:
+                            rowToRemove += (rightIndex*listDivide - listDivide)
 
-    return toRemove
+                        if rowToRemove not in removeList:
+                            removeList.append(rowToRemove)
+                        
+                    break
+                
+                
 
-# takes in a list and returns DataFrame without dupes
+
+# Takes in a list and returns DataFrame without dupelicates
+# Since with a big enough database my current method would remove all of the last entries
+# So divide the list into partitions and compare those partitions together
+# to better the algortithm DIVIDE_AMOUNT can be changed (higher->better)
+# to optimize runtime (for current database), 6 should be fine
 def dropDupes(list):
+    DIVIDE_AMOUNT = 6
     dataFrame = pd.DataFrame(list)
+    dataFrame.reset_index(drop=True, inplace=True)
+
     toRemove = []
     tempList = dataFrame["Test Case"].tolist()
-    for i in range(0,6):
-        for j in range(6, i, -1):
+    listDivide = len(tempList)//DIVIDE_AMOUNT
+    for i in range(0,DIVIDE_AMOUNT):
+        for j in range(DIVIDE_AMOUNT, i, -1):
             
-            runList = tempList[i*len(tempList)//6:(i+1)*len(tempList)//6]
-            runList += tempList[j*len(tempList)//6:(j+1)*len(tempList)//6]
+            runList = tempList[i*listDivide:(i+1)*listDivide]
+            runList += tempList[j*listDivide:(j+1)*listDivide]
 
-            removeList = findDups(runList)
-            removeList.reverse()
-            for row in removeList:
-                if(row < len(tempList)//6):
-                    row += i*len(tempList)//6
-                else:
-                    row += (j*len(tempList)//6 - len(tempList)//6)
-
-                if row not in toRemove:
-                    toRemove.append(row)
+            findDups(runList, toRemove, listDivide, i, j)
 
 
     dataFrame.drop(toRemove,  errors='ignore', inplace= True)
@@ -160,7 +178,7 @@ def disAllOnDate():
     tempList = getFromBothCollections({"Build #": {"$in" : ["10/8/24", "10/08/2024"]}})
     if(tempList):
         dataFrame = dropDupes(tempList)
-        print(f"All test cases on 10/8/24: \n{dataFrame}")
+        (f"All test cases on 10/8/24: \n{dataFrame}")
 
         print(f"Exporting {len(dataFrame)} test cases on 10/8/24 to DateExport.csv")
         dataFrame.to_csv("DateExport.csv", index=False)
@@ -257,9 +275,9 @@ if(args.triple_header):
 
 
 """
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py -h                                                     
-usage: Project2.py [-h] [--file FILE] [--collection {Collection1,Collection2}] [--my_data] [--all_repeatable] [--all_blocker]
-                   [--all_on_date] [--triple_header] [--export_user EXPORT_USER]
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py -h                                        
+usage: Project2.py [-h] [--file FILE] [--collection {Collection1,Collection2}] [--my_data] [--all_repeatable] [--all_blocker] [--all_on_date]
+                   [--triple_header] [--export_user EXPORT_USER]
 
 The Reckoning Parser
 
@@ -270,20 +288,20 @@ options:
                         Collection name
   --my_data             Generates all work by me, aka Tigran Manukyan
   --all_repeatable      Generates all repeatable test cases
-  --all_blocker        Generates all blocker test cases
+  --all_blocker         Generates all blocker test cases
   --all_on_date         Generates all test cases on 10/8/24
   --triple_header       Prints 1st test case of Matthew Bellman, middle test case of Sergio Garcia, last of Denise Pacheco
   --export_user EXPORT_USER
                         Export to a csv file a specific user
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file Oct7.csv --collection Collection1               
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file Oct7.csv --collection Collection1  
 Successfully inserted 7 records into Collection1
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file Oct14.csv --collection Collection1               
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file Oct14.csv --collection Collection1  
 Successfully inserted 7 records into Collection1
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file Oct20.csv --collection Collection1               
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file Oct20.csv --collection Collection1  
 Successfully inserted 9 records into Collection1
 tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --file EG4-DBDump_Fall2024.xlsx --collection Collection2
 Successfully inserted 1600 records into Collection2
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --my_data
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --my_data                                              
 Test Cases for Tigran Manukyan: 
     Test #   Build #                        Category  ... Repeatable? Blocker?       Test Owner
 0        0   10/7/24           Deck Builder Tutorial  ...         Yes       No  Tigran Manukyan
@@ -314,69 +332,55 @@ Test Cases for Tigran Manukyan:
 Exporting 23 test cases for Tigran Manukyan to TigranExport.csv
 tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --all_repeatable
 All Repeatable Test Cases: 
-     Test #     Build #               Category  ... Repeatable? Blocker?       Test Owner
-0         0     10/7/24  Deck Builder Tutorial  ...         Yes       No  Tigran Manukyan
-1         1     10/8/24  Deck Builder Tutorial  ...         yes      yes  Tigran Manukyan
-2         3     10/8/24                  Arena  ...         Yes       No  Tigran Manukyan
-3         5     10/8/24           Edit Profile  ...         Yes       No  Tigran Manukyan
-4         6     10/8/24     Home Page/Settings  ...         Yes       No  Tigran Manukyan
-...     ...         ...                    ...  ...         ...      ...              ...
-1292      3  10/13/2024                  Login  ...         yes       no    Dakota Wagner
-1293      4  10/13/2024              Main Page  ...         yes       no    Dakota Wagner
-1294      5  10/13/2024                  Login  ...         yes       no    Dakota Wagner
-1295      1  10/15/2024                   Game  ...         Yes       No     Nathan Wahba
-1296      3  10/15/2024                   Menu  ...         Yes       No     Nathan Wahba
+    Test #     Build #               Category  ... Repeatable? Blocker?        Test Owner
+0        0     10/7/24  Deck Builder Tutorial  ...         Yes       No   Tigran Manukyan
+1        1     10/8/24  Deck Builder Tutorial  ...         yes      yes   Tigran Manukyan
+2        3     10/8/24                  Arena  ...         Yes       No   Tigran Manukyan
+3        5     10/8/24           Edit Profile  ...         Yes       No   Tigran Manukyan
+4        6     10/8/24     Home Page/Settings  ...         Yes       No   Tigran Manukyan
+..     ...         ...                    ...  ...         ...      ...               ...
+425      3  10/15/2024                   Game  ...         yes       no  Robert Stevenson
+426      4  10/14/2024      Arena/Matchmaking  ...         Yes      Yes           Shervin
+427      3  10/13/2024                  Login  ...         yes       no     Dakota Wagner
+428      4  10/13/2024              Main Page  ...         yes       no     Dakota Wagner
+429      5  10/13/2024                  Login  ...         yes       no     Dakota Wagner
 
-[1033 rows x 9 columns]
-Exporting 1033 repeatable test cases to RepeatableExport.csv
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --all_blockers 
+[430 rows x 9 columns]
+Exporting 430 repeatable test cases to RepeatableExport.csv
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --all_blocker 
 All Blocker Test Cases: 
-     Test #     Build #               Category  ... Repeatable? Blocker?       Test Owner
-0       1.0     10/8/24  Deck Builder Tutorial  ...         yes      yes  Tigran Manukyan
-1       1.0    10/15/24     Arena\Battle Phase  ...          No      Yes  Tigran Manukyan
-2       3.0    10/15/24       Arena\Main Phase  ...         Yes      Yes  Tigran Manukyan
-3       5.0    10/15/24     Arena\Battle Phase  ...          No      Yes  Tigran Manukyan
-4       3.0    10/20/24           Arena\Battle  ...         Yes      Yes  Tigran Manukyan
-..      ...         ...                    ...  ...         ...      ...              ...
-512     3.0  10/14/2024           Deck Builder  ...         Yes      Yes           Matteo
-513     4.0  10/14/2024      Arena/Matchmaking  ...         Yes      Yes          Shervin
-514     3.0         NaN       Adventure Select  ...          NO      YES   Dhruv Vagadiya
-515     4.0         NaN              Adventure  ...          NO      YES   Dhruv Vagadiya
-516     2.0  10/15/2024                   Menu  ...          No      Yes     Nathan Wahba
+     Test #     Build #               Category  ... Repeatable? Blocker?        Test Owner
+0       1.0     10/8/24  Deck Builder Tutorial  ...         yes      yes   Tigran Manukyan
+1       1.0    10/15/24     Arena\Battle Phase  ...          No      Yes   Tigran Manukyan
+2       3.0    10/15/24       Arena\Main Phase  ...         Yes      Yes   Tigran Manukyan
+3       5.0    10/15/24     Arena\Battle Phase  ...          No      Yes   Tigran Manukyan
+4       3.0    10/20/24           Arena\Battle  ...         Yes      Yes   Tigran Manukyan
+..      ...         ...                    ...  ...         ...      ...               ...
+203     NaN  10/15/2024                GAME UI  ...         yes      yes  AB Paxtor Garcia
+204     1.0  10/15/2024                  Login  ...      yes/no      yes   Alberto Santana
+205     3.0  10/14/2024           Deck Builder  ...         Yes      Yes            Matteo
+206     4.0  10/14/2024      Arena/Matchmaking  ...         Yes      Yes           Shervin
+207     3.0         NaN       Adventure Select  ...          NO      YES    Dhruv Vagadiya
 
-[438 rows x 9 columns]
-Exporting 438 blocker test cases to BlockerExport.csv
-tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --all_on_date 
-    Test #     Build #                                Category  ... Repeatable? Blocker?       Test Owner
-0      1.0     10/8/24                   Deck Builder Tutorial  ...         yes      yes  Tigran Manukyan
-1      2.0     10/8/24          Tutorial/Deck Builder Tutorial  ...         NaN       No  Tigran Manukyan
-2      3.0     10/8/24                                   Arena  ...         Yes       No  Tigran Manukyan
-3      4.0     10/8/24                                   Arena  ...         NaN       No  Tigran Manukyan
-4      5.0     10/8/24                            Edit Profile  ...         Yes       No  Tigran Manukyan
-..     ...         ...                                     ...  ...         ...      ...              ...
-92     3.0  10/08/2024                                    Game  ...         Yes       No   Shawn Takhirov
-93     4.0  10/08/2024                                    Game  ...         Yes       No   Shawn Takhirov
-94     1.0  10/08/2024                                    Game  ...         Yes       No     Nathan Wahba
-95     2.0  10/08/2024                                    Game  ...         Yes       No     Nathan Wahba
-97     1.0  10/08/2024  Login/UI/Game/Main Page/Arena/Settings  ...         yes      yes       divy mente
-
-[90 rows x 9 columns]
+[208 rows x 9 columns]
+Exporting 208 blocker test cases to BlockerExport.csv
+tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --all_on_date
 All test cases on 10/8/24: 
-    Test #     Build #                                Category  ... Repeatable? Blocker?       Test Owner
-0      1.0     10/8/24                   Deck Builder Tutorial  ...         yes      yes  Tigran Manukyan
-1      2.0     10/8/24          Tutorial/Deck Builder Tutorial  ...         NaN       No  Tigran Manukyan
-2      3.0     10/8/24                                   Arena  ...         Yes       No  Tigran Manukyan
-3      4.0     10/8/24                                   Arena  ...         NaN       No  Tigran Manukyan
-4      5.0     10/8/24                            Edit Profile  ...         Yes       No  Tigran Manukyan
-..     ...         ...                                     ...  ...         ...      ...              ...
-92     3.0  10/08/2024                                    Game  ...         Yes       No   Shawn Takhirov
-93     4.0  10/08/2024                                    Game  ...         Yes       No   Shawn Takhirov
-94     1.0  10/08/2024                                    Game  ...         Yes       No     Nathan Wahba
-95     2.0  10/08/2024                                    Game  ...         Yes       No     Nathan Wahba
-97     1.0  10/08/2024  Login/UI/Game/Main Page/Arena/Settings  ...         yes      yes       divy mente
+    Test #     Build #                        Category  ... Repeatable? Blocker?        Test Owner
+0      1.0     10/8/24           Deck Builder Tutorial  ...         yes      yes   Tigran Manukyan
+1      2.0     10/8/24  Tutorial/Deck Builder Tutorial  ...         NaN       No   Tigran Manukyan
+2      3.0     10/8/24                           Arena  ...         Yes       No   Tigran Manukyan
+3      4.0     10/8/24                           Arena  ...         NaN       No   Tigran Manukyan
+4      5.0     10/8/24                    Edit Profile  ...         Yes       No   Tigran Manukyan
+..     ...         ...                             ...  ...         ...      ...               ...
+74    14.0  10/08/2024                              UI  ...         NaN      NaN  Robert Stevenson
+75     1.0  10/08/2024                          Login   ...        Yes        No    Shawn Takhirov
+76     2.0  10/08/2024                       Main Page  ...          No       No    Shawn Takhirov
+77     3.0  10/08/2024                            Game  ...         Yes       No    Shawn Takhirov
+78     4.0  10/08/2024                            Game  ...         Yes       No    Shawn Takhirov
 
-[90 rows x 9 columns]
-Exporting 90 test cases on 10/8/24 to DateExport.csv
+[79 rows x 9 columns]
+Exporting 79 test cases on 10/8/24 to DateExport.csv
 tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --triple_header
 The first test case for Mattew Bellman: 
 Test #                                                             1
@@ -418,6 +422,6 @@ Name: 8, dtype: object
 Exporting last test case for Denis Pacheco to PachecoExport.csv
 tiko@Tikos-MacBook-Pro Project2 % python3 Project2.py --export_user "Kevin Chaja"
 Exporting 25 test cases for user Kevin Chaja to userExport.csv
-tiko@Tikos-MacBook-Pro Project2 %
+tiko@Tikos-MacBook-Pro Project2 % 
 
 """
