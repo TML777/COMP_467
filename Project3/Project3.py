@@ -1,10 +1,14 @@
 from argparse import ArgumentParser
 import pandas as pd
-import re
-from string import punctuation
-import csv
-
+from csv import writer as csvWriter
+import ffmpeg
+from subprocess import run as subRun
+from os import mkdir
+from shutil import rmtree
+#from frameioclient import FrameioClient
 from pymongo import MongoClient
+
+
 myclient = MongoClient("mongodb://localhost:27017/")
 db = myclient["TheCrucible"]
 
@@ -12,9 +16,26 @@ baselightCollection = db["Baselight"]
 xytechCollection = db["Xytech"]
 
 
-# final document to be outputed as csv
-finalCSV = [["Producer", "Operator", "job", "notes"],["","","",""],[],["show location","frames to fix"]]
-locations = {}
+xlsFlag = False
+csvFlag = False
+
+fps = 25
+
+
+def framesToTime(totalFrames):
+    returnString = f":{totalFrames%fps:02}"
+
+    time = totalFrames // fps
+
+    returnString = f":{time%60:02}" + returnString
+
+    time = time // 60
+
+    returnString = f":{time%60:02}" + returnString
+
+    time = time // 60
+
+    return f"{time:02}" + returnString
 
 
 
@@ -25,12 +46,14 @@ def importXytech(fileName):
 
     xytechData = []
 
+    infoData = {}
+
 
     inLocations = False
     inNotes = False
     notes = ""
 
-    # reading first file
+    # xytech line by line
     for line in xytech.readlines():
 
         # spliting lines to make it easear to read
@@ -44,34 +67,28 @@ def importXytech(fileName):
                 # setting notes in proper location
                 notes = notes + line
             elif("Note" in lineCont[0]):
-                # set notes flag
                 inNotes = True
             elif(inLocations and "/" in lineCont[0]):
-                # adding to locations map
-                # key: what it will share with the baselight file
-                # value: the actual location
                 xytechData.append({"Location": lineCont[0]})
             elif("Location" in lineCont[0]):
-                # set location flag
                 inLocations = True
             elif("Producer" in lineCont[0]):
-                # setting producer name in proper location
-                xytechData.append({"Producer": " ".join(lineCont[1:])})
+                infoData["Producer"] = " ".join(lineCont[1:])
             elif("Operator" in lineCont[0]):
-                # setting operator name in proper location
-                xytechData.append({"Operator": " ".join(lineCont[1:])})
+                infoData["Operator"] = " ".join(lineCont[1:])
             elif("Job" in lineCont[0]):
-                # setting job in proper location
-                xytechData.append({"Job": " ".join(lineCont[1:])})
+                infoData["Job"] = " ".join(lineCont[1:])
 
-    xytechData.append({"Note": notes})
+    infoData["Note"] = notes
+
+    xytechData.append(infoData)
 
     xytechCollection.insert_many(xytechData)
 
 
 
 def importBaselight(fileName):
-    #open second file
+    #open baselight file
     baseLight = open(fileName, "r")
 
     baselightData = []
@@ -127,7 +144,7 @@ def importBaselight(fileName):
                     
                     start = cellNum
                     last = cellNum
-                    
+
     # last cell being added if there is anything to add
     if(start != -1):
         # start == last then single cell to be added 
@@ -138,17 +155,116 @@ def importBaselight(fileName):
             baselightData.append({"Location": current, "Frame": str(start) + "-" + str(last)})
 
     baselightCollection.insert_many(baselightData)
+
+
+
+def startProcess(videoPath):
+    probe = ffmpeg.probe(videoPath)
+    duration = float(probe['format']['duration'])
+
+
+    # client = FrameioClient("fio-u-W5pGArD5iT4qCuObzbupqPBFvKNyIn5ZI58kqENCysIWEu8_3wocUTK-vbUsGAmX")
+    
+
+    if(xlsFlag or csvFlag):
+
+        finalCSV = [["Producer", "Operator", "job", "notes"],["","","",""],[],["Location","Frame Ranges", "Timecode Ranges", "Thumbnail"]]
+        locations = {}
+
+        temp = list(xytechCollection.find({"Location": {"$exists":False}},{"_id":0}))[0]
+        finalCSV[1][0] = temp["Producer"]
+        finalCSV[1][1] = temp["Operator"]
+        finalCSV[1][2] = temp["Job"]
+        finalCSV[1][3] = temp["Note"]
+
+        for loc in xytechCollection.find({"Location": {"$exists":True}},{"_id":0}):
+
+            locations['/'.join(loc["Location"].split('/')[3:])] = loc["Location"]
             
-        
+        if(xlsFlag):
+            df = pd.DataFrame(finalCSV)            
+
+            writer = pd.ExcelWriter('rangesInVideo.xlsx', engine='xlsxwriter')
+            df.to_excel(writer, sheet_name='Sheet1', index=False, header=False)
+            worksheet = writer.sheets['Sheet1']
+
+
+            # temp folder for tumbnails
+            mkdir("tempThumbnailFolder")
+
+            excelLocation = 5
 
 
 
+    # temp folder for videos
+    mkdir("tempVideoFolder")
+    
+    
+    for row in baselightCollection.find({},{"_id":0}):
+        frameSplit = row["Frame"].split('-')
+        if(len(frameSplit)>1 and int(frameSplit[1])/fps < duration):
 
-def exportcsv():
-    # output everything to csv file
-    outputFile = open("job_2.csv", "w")
-    outputWriter = csv.writer(outputFile)
-    outputWriter.writerows(finalCSV)
+            cmd = [
+                    "ffmpeg",
+                    "-v", "quiet",
+                    "-i", videoPath,
+                    "-ss", str(int(frameSplit[0])/fps),
+                    "-t", str((int(frameSplit[1])-int(frameSplit[0])+1)/fps),
+                    "tempVideoFolder/video" + frameSplit[0] + ".mp4"
+            ]
+            subRun(cmd)
+
+            # client.assets.upload("d1b75dc2-08c1-4b2f-9316-f66ac5d51d29", "tempVideoFolder/video" + frameSplit[0] + ".mp4")
+            
+            if(xlsFlag):
+                startTimecode = framesToTime(int(frameSplit[0]))
+                endTimecode = framesToTime(int(frameSplit[1]))
+                worksheet.write("A" + str(excelLocation), locations['/'.join(row["Location"].split('/')[2:])])
+                worksheet.write("B" + str(excelLocation), row["Frame"])
+                worksheet.write("C" + str(excelLocation), startTimecode + '-' + endTimecode)
+
+                midFrame = (int(frameSplit[0]) + int(frameSplit[1]))//2
+
+
+                cmd = [
+                        "ffmpeg",
+                        "-v", "quiet",
+                        "-i", videoPath,
+                        "-ss", str(midFrame/25),
+                        "-frames:v", "1",
+                        "-s", "96x74",
+                        "tempThumbnailFolder/tempImage" + str(excelLocation) + ".png"
+                ]
+                subRun(cmd)
+                    
+                worksheet.insert_image("D" + str(excelLocation),"tempThumbnailFolder/tempImage" + str(excelLocation) + ".png")
+
+                excelLocation += 1
+        elif(csvFlag):
+            finalCSV.append([locations['/'.join(row["Location"].split('/')[2:])], row["Frame"]])
+
+
+    #################################################
+    # Turn on after upload to delete temp files
+    # rmtree("tempVideoFolder", ignore_errors=True)
+    #################################################
+
+
+    if(xlsFlag):
+        writer.close()
+        # delete temp folder
+        rmtree("tempThumbnailFolder", ignore_errors=True)
+
+    if(csvFlag):
+        finalCSV[3].pop()
+        finalCSV[3].pop()
+        finalCSV[3][1]= "Frames to fix"
+
+        outputFile = open("excluded.csv", "w")
+        outputWriter = csvWriter(outputFile)
+        outputWriter.writerows(finalCSV)
+
+
 
 
 
@@ -161,9 +277,16 @@ parser.add_argument('--baselight',
 parser.add_argument('--xytech',
                     type=str,
                     help= "Location of the xytech file to import into databse")
+parser.add_argument('--process',
+                    type=str,
+                    help= "Video file to process")
+parser.add_argument('-xls', '--outputXLS',
+                    action='store_true',
+                    help= "Outputs XLS of all ranges that fall into video")
+parser.add_argument('-csv', '--outputCSV',
+                    action='store_true',
+                    help= "Outputs CSV of all frame/ranges that dont fall into video")
 
-parser.add_argument('-v', '--verbose',
-                    action='store_true')
 
 args = parser.parse_args()
 
@@ -171,7 +294,12 @@ if(args.baselight):
     importBaselight(args.baselight)
 if(args.xytech):
     importXytech(args.xytech)
-print(args.verbose)
+if(args.process):
+    xlsFlag = args.outputXLS
+    csvFlag = args.outputCSV
+    startProcess(args.process)
+
+
 
 
 
