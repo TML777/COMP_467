@@ -1,4 +1,4 @@
-# Marks Automation
+# Import/Export Script
 
 ## Overview
 This script facilitates the parsing, computation, and export of data between Baselight and Xytech work orders, transitioning file storage from local Baselight systems to facility storage. It handles errors in third-party data and ensures accurate processing of frame ranges and locations.
