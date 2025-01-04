@@ -1,4 +1,4 @@
-# Multimedia System Design 
+# QA Script
 
 ## Overview
 Automation script in Python, that populates a database with global QA reports. Python code duplicates the workflow of Global App Testing Company and updates a QA database. Instantly create reports for operations, including listing all blockers, repeatable, date, and/or specific users.
